@@ -1,7 +1,9 @@
 from enum import Enum
 import random
 
+SAMPLES = 1
 BOARD_SIZE = 10
+MAX_COORD = BOARD_SIZE - 1
 FISH_GROUP_SIZES = [7, 4, 2, 2]
 N_WOOD = 15
 
@@ -20,26 +22,52 @@ def generate():
     if generate_fish(board) is False:
         print("Failed at generating fish. Trying again...")
         generate()
-    # TODO:
-    # if generate_wood(board) is False:
-    #     print("Failed at generating wood. Trying again...")
-    #     generate()
+    if generate_wood(board) is False:
+        print("Failed at generating wood. Trying again...")
+        generate()
+    print_board(board)
 
 
 def generate_wood(board):
     n_wood_remaining = N_WOOD
     while n_wood_remaining > 0:
-        # tile_size = random_tile_size(n_wood_remaining)
-        tile_size = 3
-        print(tile_size)
+        tile_size = random_tile_size(n_wood_remaining)
         n_wood_remaining -= tile_size
-        valid = valid_places(board, (1, tile_size))
-        is_edge_wood = fractional_chance(3, 4)
+        valid_spots = valid_places(board, (1, tile_size))
+        valid_spots = [spot for spot in valid_spots if not area_touches_type(board, spot, Type.WOOD)]
+        edge_spots, inner_spots = filter_edge_groups(valid_spots)
+
+        want_to_be_edge = False
+        if edge_spots and inner_spots:
+            want_to_be_edge = fractional_chance(3, 4)
+        if want_to_be_edge or not inner_spots or (not want_to_be_edge and not inner_spots):
+            group = random.choice(edge_spots)
+        else:
+            group = random.choice(inner_spots)
+
+        set_area(board, group, Type.WOOD)
+
+
+def area_touches_type(board, tl_br_points, tile_type):
+    all_coords = get_coords_tlbr(*tl_br_points)
+    all_neighbors = unique_neighbors_of_group(all_coords)
+    return any([get_tile(board, n) == tile_type for n in all_neighbors])
+
+
+def unique_neighbors_of_group(list_of_coords):
+    neighbors_per_coord = [get_neighbors(c) for c in list_of_coords]
+    return list(set([n for neighbors in neighbors_per_coord for n in neighbors if n not in list_of_coords]))
 
 
 # group = [( (1,2), (3,4) ), ...]
 def filter_edge_groups(groups):
-    return [g for g in groups if 0 in g[0]]
+    edges = [g for g in groups if 0 in g[0]]
+    non_edges = [g for g in groups if g not in edges]
+    return edges, non_edges
+
+
+def is_edge_group(group):
+    return any([0 in coord or MAX_COORD in coord for coord in group])
 
 
 # group_size = (4, 5)
@@ -52,14 +80,14 @@ def valid_places(board, group_size):
                 continue
             # Rotatable
             if is_valid_place(board, i, j, group_width, group_height):
-                valid.append(((i, j), (i + group_width, j + group_height)))
+                valid.append(((i, j), (i + group_width - 1, j + group_height - 1)))
             if is_valid_place(board, i, j, group_height, group_width):
-                valid.append(((i, j), (i + group_height, j + group_width)))
+                valid.append(((i, j), (i + group_height - 1, j + group_width - 1)))
     return valid
 
 
 def is_valid_place(board, i, j, w, h):
-    if i + w > len(board) or j + h > len(board[0]):
+    if i + w - 1 > MAX_COORD or j + h - 1 > MAX_COORD:
         return False
     cells = get_cells_in_area(board, i, j, w, h)
     return all([c is None for c in cells])
@@ -73,12 +101,16 @@ def get_cells_in_area(board, i, j, w, h):
     return window
 
 
-def get_coords_in_area(i, j, w, h):
+def get_coords_in_block(i, j, w, h):
     coords = []
     for x in range(i, i + w):
         for y in range(j, j + h):
             coords.append((x, y))
     return coords
+
+
+def get_coords_tlbr(tl, br):
+    return [(i, j) for i in irange(tl[0], br[0]) for j in irange(tl[1], br[1])]
 
 
 def fractional_chance(i, j):
@@ -88,7 +120,7 @@ def fractional_chance(i, j):
 
 def random_tile_size(n_wood_remaining):
     if n_wood_remaining <= 2:
-        return random.choice(range(1, n_wood_remaining + 1))
+        return random.choice(irange(1, n_wood_remaining))
     else:
         return random.choice(range(1, 4))
 
@@ -133,12 +165,18 @@ def is_adjacent_to(board, coord, adjacent_type):
 
 
 def set_tile(board, coord, tile_type):
+    assert get_tile(board, coord) is None
     board[coord[0]][coord[1]] = tile_type
 
 
 def set_all_tiles(board, coord_list, tile_type):
     for c in coord_list:
         set_tile(board, c, tile_type)
+
+
+def set_area(board, tl_br_coords, tile_type):
+    coords = get_coords_tlbr(*tl_br_coords)
+    set_all_tiles(board, coords, tile_type)
 
 
 def get_tile(board, coord):
@@ -162,11 +200,11 @@ def get_neighbors(coord):
     neighbors = []
     if coord[0] != 0:
         neighbors.append((coord[0] - 1, coord[1]))
-    if coord[0] != BOARD_SIZE - 1:
+    if coord[0] != MAX_COORD:
         neighbors.append((coord[0] + 1, coord[1]))
     if coord[1] != 0:
         neighbors.append((coord[0], coord[1] - 1))
-    if coord[1] != BOARD_SIZE - 1:
+    if coord[1] != MAX_COORD:
         neighbors.append((coord[0], coord[1] + 1))
     return neighbors
 
@@ -175,8 +213,8 @@ def get_empty_edges(board):
     open_coords = []
     for i, row in enumerate(board):
         for j, cell in enumerate(row):
-            if ((i == 0 or i == BOARD_SIZE - 1
-                 or j == 0 or j == BOARD_SIZE - 1)
+            if ((i == 0 or i == MAX_COORD
+                 or j == 0 or j == MAX_COORD)
                     and cell is None):
                 open_coords.append((i, j))
     return open_coords
@@ -207,11 +245,16 @@ def cell_string(cell):
         return "🏙️"
     elif cell == Type.FIELD:
         return "🏜️"
-    print(cell)
+    return cell
+
+
+def irange(start, stop):
+    return range(start, stop + 1)
 
 
 def main():
-    generate()
+    for i in range(SAMPLES):
+        generate()
 
 
 if __name__ == '__main__':
